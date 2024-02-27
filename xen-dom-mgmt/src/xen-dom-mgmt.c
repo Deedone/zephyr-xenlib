@@ -1218,7 +1218,7 @@ deinit:
 	return rc;
 }
 
-static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device *dev)
+static int initialize_dom0_xenstore(void)
 {
 	int ret = 0;
 	struct xen_domain_cfg *dom0cfg = NULL;
