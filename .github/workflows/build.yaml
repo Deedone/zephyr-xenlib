@@ -76,14 +76,18 @@ jobs:
           echo "Pull request head ref" "${{ github.event.pull_request.head.ref }}"
           echo "Pull request head repo" "${{ github.event.pull_request.head.repo.clone_url }}"
 
-          if [ -eq "${{ github.event_name }}" "pull_request_target" ]
+          if [[ "${{ github.event_name }}" == "pull_request_target" ]]
           then
-            git remote add pr ${{ github.event.pull_request.head.repo.clone_url }}
-            git fetch pr
+            echo git remote add origin ${{ github.event.pull_request.head.repo.clone_url }}
+            git remote add origin ${{ github.event.pull_request.head.repo.clone_url }}
           else
-            git fetch
+            echo git remote add origin ${{ github.event.repository.clone_url }}
+            git remote add origin ${{ github.event.repository.clone_url }}
           fi
-          git checkout  ${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}
+          git fetch origin
+          git branch -a
+          echo "Checking out branch ${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}"
+          git checkout  origin/${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}
 
       - name: Build
         run: |
