@@ -72,7 +72,17 @@ jobs:
           ls
           cd zephyr-xenlib
           git remote -v
-          git fetch
+          echo "Event name" "${{ github.event_name }}"
+          echo "Pull request head ref" "${{ github.event.pull_request.head.ref }}"
+          echo "Pull request head repo" "${{ github.event.pull_request.head.repo.clone_url }}"
+
+          if [ -eq "${{ github.event_name }}" "pull_request_target" ]
+          then
+            git remote add pr ${{ github.event.pull_request.head.repo.clone_url }}
+            git fetch pr
+          else
+            git fetch
+          fi
           git checkout  ${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}
 
       - name: Build
@@ -80,3 +90,4 @@ jobs:
           pwd
           ls
           west build -p always -b rcar_spider zephyr-dom0-xt -- -DSHIELD=xen_dom0
+
