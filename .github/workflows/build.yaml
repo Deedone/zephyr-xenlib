@@ -7,7 +7,9 @@ on:
   pull_request_target:
 
 env:
-  sdk_version: "0.16.5-1"
+  sdk_version: ${{ vars.SDK_VERSION  || '0.16.5-1' }}
+  aos_revision: ${{ vars.AOS_REVISION || 'main' }}
+  zephyr_revision: ${{ vars.ZEPHYR_REVISION || 'wip_dom0-xt_qemu' }}
 
 jobs:
   build:
@@ -16,16 +18,21 @@ jobs:
       matrix:
         target: [rcar_spider, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
         project: [zephyr-dom0-xt, aos-core-zephyr]
+        exclude:
+          - target: qemu_cortex_a53
+            project: aos-core-zephyr
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
       - name: Install python dependencies
+        run: pip install west pyelftools protobuf grpcio-tools
+
+      - name: Install apt dependencies
         run: |
-          pip install west
-          pip install pyelftools
+          sudo apt-get install ninja-build protobuf-compiler gperf
 
       - name: Cache Zephyr SDK
         id: cache-sdk
@@ -43,21 +50,17 @@ jobs:
           tar xf zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
           rm zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
 
-      - name: Install zephyr SDK
+      - name: Install Zephyr SDK
         run: |
           cd sdk/zephyr-sdk-${{ env.sdk_version }}
           yes | ./setup.sh
-
-      - name: Install Ninja
-        run: |
-          sudo apt-get install ninja-build
 
       - name: Clone zephyr-dom0-xt
         uses: actions/checkout@v4
         if: matrix.project == 'zephyr-dom0-xt'
         with:
           repository: xen-troops/zephyr-dom0-xt
-          ref: wip_dom0-xt_qemu
+          ref: ${{ env.zephyr_revision }}
           path: zephyr-dom0-xt
 
       - name: Clone aos-core-zephyr
@@ -65,7 +68,7 @@ jobs:
         if: matrix.project == 'aos-core-zephyr'
         with:
           repository: aoscloud/aos_core_zephyr
-          ref: main
+          ref: ${{ env.aos_revision }}
           path: aos-core-zephyr
 
       - name: Environment setup
@@ -74,26 +77,43 @@ jobs:
           west update
 
       - name: Check out zephyr-xenlib
-        run: |
-          cd zephyr-xenlib
-          echo "Event name" "${{ github.event_name }}"
-          echo "Pull request head ref" "${{ github.event.pull_request.head.ref }}"
-          echo "Pull request head repo" "${{ github.event.pull_request.head.repo.clone_url }}"
+        uses: actions/checkout@v4
+        with:
+          path: zephyr-xenlib
 
-          if [[ "${{ github.event_name }}" == "pull_request_target" ]]
-          then
-            echo Using origin ${{ github.event.pull_request.head.repo.clone_url }}
-            git remote add origin ${{ github.event.pull_request.head.repo.clone_url }}
-          else
-            echo Using origin ${{ github.event.repository.clone_url }}
-            git remote add origin ${{ github.event.repository.clone_url }}
-          fi
-          git fetch origin
-          git branch -a
-          echo "Checking out branch ${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}"
-          git checkout  origin/${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}
+      # - name: Check out zephyr-xenlib
+      #   run: |
+      #     cd zephyr-xenlib
+      #     echo "Event name" "${{ github.event_name }}"
+      #     echo "Pull request head ref" "${{ github.event.pull_request.head.ref }}"
+      #     echo "Pull request head repo" "${{ github.event.pull_request.head.repo.clone_url }}"
 
-      - name: Build
+      #     if [[ "${{ github.event_name }}" == "pull_request_target" ]]
+      #     then
+      #       echo Using origin ${{ github.event.pull_request.head.repo.clone_url }}
+      #       git remote add origin ${{ github.event.pull_request.head.repo.clone_url }}
+      #     else
+      #       echo Using origin ${{ github.event.repository.clone_url }}
+      #       git remote add origin ${{ github.event.repository.clone_url }}
+      #     fi
+      #     git fetch origin
+      #     git branch -a
+      #     echo "Checking out branch ${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}"
+      #     git checkout  origin/${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}
+
+      - name: Build zephyr-dom0-xt
+        if: matrix.project == 'zephyr-dom0-xt'
         run: |
-          west build -p always -b ${{ matrix.target }} ${{ matrix.project }} -- -DSHIELD=xen_dom0
+          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -- -DSHIELD=xen_dom0
+
+      - name: Build aos-core-zephyr
+        if: matrix.project == 'aos-core-zephyr'
+        run: |
+          touch u-boot.bin
+          touch dtb.dtb
+          touch rootca.pem
+          west build -p always -b ${{ matrix.target }} aos-core-zephyr -- -DSHIELD=xen_dom0 \
+            -D'CONFIG_DOMD_UBOOT_PATH="../u-boot.bin"' \
+            -D'CONFIG_DOMD_DTB_PATH="../dtb.dtb"' \
+            -D'CONFIG_AOS_ROOT_CA_PATH="../rootca.pem"'
 
