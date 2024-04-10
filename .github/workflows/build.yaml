@@ -15,6 +15,7 @@ jobs:
     strategy:
       matrix:
         target: [rcar_spider, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
+        project: [zephyr-dom0-xt, aos-core-zephyr]
     steps:
       - name: Set up Python
         uses: actions/setup-python@v3
@@ -53,14 +54,23 @@ jobs:
 
       - name: Clone zephyr-dom0-xt
         uses: actions/checkout@v4
+        if: matrix.project == 'zephyr-dom0-xt'
         with:
           repository: xen-troops/zephyr-dom0-xt
           ref: wip_dom0-xt_qemu
           path: zephyr-dom0-xt
 
+      - name: Clone aos-core-zephyr
+        uses: actions/checkout@v4
+        if: matrix.project == 'aos-core-zephyr'
+        with:
+          repository: aoscloud/aos_core_zephyr
+          ref: main
+          path: aos-core-zephyr
+
       - name: Environment setup
         run: |
-          west init -l zephyr-dom0-xt
+          west init -l ${{ matrix.project }}
           west update
 
       - name: Check out zephyr-xenlib
@@ -85,5 +95,5 @@ jobs:
 
       - name: Build
         run: |
-          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -- -DSHIELD=xen_dom0
+          west build -p always -b ${{ matrix.target }} ${{ matrix.project }} -- -DSHIELD=xen_dom0
 
