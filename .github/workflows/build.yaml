@@ -1,0 +1,89 @@
+name: Build with zephyr-dom0-xt
+
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+
+env:
+  sdk_version: "0.16.5-1"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        target: [rcar_spider, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.x'
+
+      - name: Install python dependencies
+        run: |
+          pip install west
+          pip install pyelftools
+
+      - name: Cache Zephyr SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk
+          key: ${{ runner.os }}-zephyr-sdk-${{ env.sdk_version }}
+
+      - name: Download Zephyr SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir sdk
+          cd sdk
+          wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${{ env.sdk_version }}/zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
+          tar xf zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
+          rm zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
+
+      - name: Install zephyr SDK
+        run: |
+          cd sdk/zephyr-sdk-${{ env.sdk_version }}
+          yes | ./setup.sh
+
+      - name: Install Ninja
+        run: |
+          sudo apt-get install ninja-build
+
+      - name: Clone zephyr-dom0-xt
+        uses: actions/checkout@v4
+        with:
+          repository: xen-troops/zephyr-dom0-xt
+          ref: wip_dom0-xt_qemu
+          path: zephyr-dom0-xt
+
+      - name: Environment setup
+        run: |
+          west init -l zephyr-dom0-xt
+          west update
+
+      - name: Check out zephyr-xenlib
+        run: |
+          cd zephyr-xenlib
+          echo "Event name" "${{ github.event_name }}"
+          echo "Pull request head ref" "${{ github.event.pull_request.head.ref }}"
+          echo "Pull request head repo" "${{ github.event.pull_request.head.repo.clone_url }}"
+
+          if [[ "${{ github.event_name }}" == "pull_request_target" ]]
+          then
+            echo Using origin ${{ github.event.pull_request.head.repo.clone_url }}
+            git remote add origin ${{ github.event.pull_request.head.repo.clone_url }}
+          else
+            echo Using origin ${{ github.event.repository.clone_url }}
+            git remote add origin ${{ github.event.repository.clone_url }}
+          fi
+          git fetch origin
+          git branch -a
+          echo "Checking out branch ${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}"
+          git checkout  origin/${{ github.event_name == 'push' && 'main' || github.event.pull_request.head.ref }}
+
+      - name: Build
+        run: |
+          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -- -DSHIELD=xen_dom0
+
