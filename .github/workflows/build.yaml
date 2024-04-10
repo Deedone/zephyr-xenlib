@@ -12,6 +12,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        target: [rcar_spider, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
     steps:
       - name: Set up Python
         uses: actions/setup-python@v3
@@ -78,10 +81,10 @@ jobs:
 
           if [[ "${{ github.event_name }}" == "pull_request_target" ]]
           then
-            echo git remote add origin ${{ github.event.pull_request.head.repo.clone_url }}
+            echo Using origin ${{ github.event.pull_request.head.repo.clone_url }}
             git remote add origin ${{ github.event.pull_request.head.repo.clone_url }}
           else
-            echo git remote add origin ${{ github.event.repository.clone_url }}
+            echo Using origin ${{ github.event.repository.clone_url }}
             git remote add origin ${{ github.event.repository.clone_url }}
           fi
           git fetch origin
@@ -93,5 +96,5 @@ jobs:
         run: |
           pwd
           ls
-          west build -p always -b rcar_spider zephyr-dom0-xt -- -DSHIELD=xen_dom0
+          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -- -DSHIELD=xen_dom0
 
