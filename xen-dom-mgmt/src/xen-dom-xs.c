@@ -20,6 +20,7 @@
 #include <xstat.h>
 #endif
 
+bad code
 #include <xen-dom-xs.h>
 #include <xenstore_srv.h>
 
