@@ -16,7 +16,9 @@
 #include <domain.h>
 #include <xen/public/io/xs_wire.h>
 #include <xss.h>
+#ifdef CONFIG_XSTAT
 #include <xstat.h>
+#endif
 #include <xen-dom-xs.h>
 #include <xenstore_srv.h>
 
