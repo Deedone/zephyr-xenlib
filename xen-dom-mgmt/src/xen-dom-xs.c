@@ -20,6 +20,7 @@
 #include <xen-dom-xs.h>
 #include <xenstore_srv.h>
 
+bad code
 LOG_MODULE_REGISTER(xen_dom_xs);
 
 /*
