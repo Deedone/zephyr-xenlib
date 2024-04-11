@@ -79,6 +79,7 @@ jobs:
       - name: Check out zephyr-xenlib
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           path: zephyr-xenlib
 
       # - name: Check out zephyr-xenlib
