@@ -367,9 +367,8 @@ static void console_display_thrd(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 	struct xen_domain_console *console = p1;
 	const struct shell *shell = p2;
-	/* Buffer input a little */
-	char buf[32];
-	int read;
+	size_t buf_pos;
+	int size;
 
 	shell_info(shell, "Attached to a domain console");
 
@@ -387,19 +386,13 @@ static void console_display_thrd(void *p1, void *p2, void *p3)
 		}
 
 		while (console->int_cons < console->int_prod) {
-			read = 0;
-			memset(buf, 0, sizeof(buf));
-
-			/* TODO: There is a room for optimization.... */
-			while (console->int_cons < console->int_prod &&
-			       read < sizeof(buf) - 1) {
-				size_t buf_pos = (console->int_cons++) &
-					(XEN_CONSOLE_BUFFER_SZ - 1);
-				buf[read++] = console->int_buf[buf_pos];
-			}
-			if (read) {
-				shell_fprintf(shell, SHELL_NORMAL, "%s", buf);
-			}
+			buf_pos = (console->int_cons++) &
+				(XEN_CONSOLE_BUFFER_SZ - 1);
+			size = (console->int_prod - console->int_cons) &
+				(XEN_CONSOLE_BUFFER_SZ - 1);
+			shell_fprintf(shell, SHELL_NORMAL, "%.*s", size + 1,
+						&console->int_buf[buf_pos]);
+			console->int_cons += size;
 		}
 		k_mutex_unlock(&console->lock);
 	}
