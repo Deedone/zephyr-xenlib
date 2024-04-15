@@ -20,7 +20,7 @@
 
 #include <storage.h>
 #include <xen_dom_mgmt.h>
-#include <xl_parser.h>
+//#include <xl_parser.h>
 #include "xrun.h"
 
 LOG_MODULE_REGISTER(xrun);
@@ -83,6 +83,7 @@ static char *gdtdevs[CONFIG_XRUN_DTDEVS_MAX];
 static struct xen_domain_iomem giomems[CONFIG_XRUN_IOMEMS_MAX];
 static uint32_t girqs[CONFIG_XRUN_IRQS_MAX];
 
+#define CONTAINER_NAME_SIZE 64
 struct container {
 	sys_snode_t node;
 
@@ -96,6 +97,7 @@ struct container {
 	char dt_image[CONFIG_XRUN_MAX_PATH_SIZE];
 	bool has_dt_image;
 	enum container_status status;
+	int refcount;
 };
 
 static const struct json_obj_descr hypervisor_spec_descr[] = {
@@ -163,11 +165,9 @@ int parse_config_json(char *json, size_t json_size, struct domain_spec *domain)
 	return ret;
 }
 
-static struct container *get_container(const char *container_id)
+static struct container *find_container_locked(const char *container_id)
 {
 	struct container *container = NULL;
-
-	k_mutex_lock(&container_lock, K_FOREVER);
 
 	SYS_SLIST_FOR_EACH_CONTAINER(&container_list, container, node) {
 		if (strncmp(container->container_id, container_id,
@@ -176,8 +176,38 @@ static struct container *get_container(const char *container_id)
 		}
 	}
 
+	return container;
+}
+
+static struct container *get_container(const char *container_id)
+{
+	struct container *container = NULL;
+
+	k_mutex_lock(&container_lock, K_FOREVER);
+
+	container = find_container_locked(container_id);
+	if (container) {
+		container->refcount++;
+		printf("Cont %s refcount %d\n", container->container_id, container->refcount);
+	}
+
 	k_mutex_unlock(&container_lock);
 	return container;
+}
+
+static void put_container(struct container *container)
+{
+	k_mutex_lock(&container_lock, K_FOREVER);
+
+	container->refcount--;
+	printf("Cont %s refcount %d\n", container->container_id, container->refcount);
+	if (container->refcount == 0) {
+		printf("Freeing container %s\n", container->container_id);
+		sys_slist_find_and_remove(&container_list, &container->node);
+		k_free(container);
+	}
+
+	k_mutex_unlock(&container_lock);
 }
 
 static struct container *register_container_id(const char *container_id)
@@ -201,8 +231,10 @@ static struct container *register_container_id(const char *container_id)
 	 * ensure that this object does not disappear under
 	 * your feet.
 	 */
+	printf("register container id %s\n", container_id);
 	container = get_container(container_id);
 	if (container) {
+		put_container(container);
 		LOG_ERR("Container %s already exists", container_id);
 		return NULL;
 	}
@@ -217,6 +249,7 @@ static struct container *register_container_id(const char *container_id)
 
 	k_mutex_lock(&container_lock, K_FOREVER);
 	sys_slist_append(&container_list, &container->node);
+	container->refcount = 1;
 	k_mutex_unlock(&container_lock);
 
 	return container;
@@ -224,16 +257,18 @@ static struct container *register_container_id(const char *container_id)
 
 static int unregister_container_id(const char *container_id)
 {
-	struct container *container = get_container(container_id);
+	struct container *container = NULL;
+
+	k_mutex_lock(&container_lock, K_FOREVER);
+	container = find_container_locked(container_id);
+	k_mutex_unlock(&container_lock);
+	printf("unregister container id %s\n", container_id);
 
 	if (!container) {
 		return -ENOENT;
 	}
 
-	k_mutex_lock(&container_lock, K_FOREVER);
-	sys_slist_find_and_remove(&container_list, &container->node);
-	k_mutex_unlock(&container_lock);
-	k_free(container);
+	put_container(container);
 	return 0;
 }
 
@@ -283,7 +318,7 @@ static int fill_domcfg(struct xen_domain_cfg *domcfg, struct domain_spec *spec,
 		return -EINVAL;
 	}
 
-	snprintf(domcfg->name, CONTAINER_NAME_SIZE, "%s", container->container_id);
+	// snprintf(domcfg->name, CONTAINER_NAME_SIZE, "%s", container->container_id);
 	domcfg->mem_kb = (spec->vm.hwConfig.memKB) ?
 		spec->vm.hwConfig.memKB : 4096;
 	domcfg->flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
@@ -385,11 +420,11 @@ static int fill_domcfg(struct xen_domain_cfg *domcfg, struct domain_spec *spec,
 	}
 
 	/* Parse and fill backend configuration */
-	memset(&domcfg->back_cfg, 0, sizeof(domcfg->back_cfg));
+	// memset(&domcfg->back_cfg, 0, sizeof(domcfg->back_cfg));
 
-	for (i = 0; i < spec->vm.kernel.params_len; i++) {
-		parse_one_record_and_fill_cfg(spec->vm.kernel.parameters[i], &domcfg->back_cfg);
-	}
+	//for (i = 0; i < spec->vm.kernel.params_len; i++) {
+		//parse_one_record_and_fill_cfg(spec->vm.kernel.parameters[i], &domcfg->back_cfg);
+	// }
 
 	return 0;
 }
@@ -601,11 +636,11 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 		goto err_config;
 	}
 
-	ret = domain_post_create(&domcfg, container->domid);
-	if (ret) {
-		k_mutex_unlock(&container_run_lock);
-		goto err_config;
-	}
+	//ret = domain_post_create(&domcfg, container->domid);
+	// if (ret) {
+	// 	k_mutex_unlock(&container_run_lock);
+	// 	goto err_config;
+	// }
 
 	ret = domain_unpause(container->domid);
 
@@ -635,10 +670,12 @@ int xrun_pause(const char *container_id)
 
 	ret = domain_pause(container->domid);
 	if (ret) {
+		put_container(container);
 		return ret;
 	}
 
 	container->status = PAUSED;
+	put_container(container);
 	return 0;
 }
 
@@ -653,10 +690,12 @@ int xrun_resume(const char *container_id)
 
 	ret = domain_unpause(container->domid);
 	if (ret) {
+		put_container(container);
 		return ret;
 	}
 
 	container->status = RUNNING;
+	put_container(container);
 	return 0;
 }
 
@@ -671,9 +710,11 @@ int xrun_kill(const char *container_id)
 
 	ret = domain_destroy(container->domid);
 	if (ret) {
+		put_container(container);
 		return ret;
 	}
 
+	put_container(container);
 	return unregister_container_id(container_id);
 }
 
@@ -686,5 +727,6 @@ int xrun_state(const char *container_id, enum container_status *state)
 	}
 
 	*state = container->status;
+	put_container(container);
 	return 0;
 }
