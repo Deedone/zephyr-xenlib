@@ -638,6 +638,18 @@ struct xen_domain_cfg *domain_find_config(const char *name)
 	return NULL;
 }
 
+int get_domain_name(unsigned short domain_id, char *name, int len)
+{
+#ifdef CONFIG_XEN_STORE_SRV
+	char path[sizeof("/local/domain/32768/name")];
+
+	snprintf(path, sizeof(path), "/local/domain/%u/name", domain_id);
+	return xss_read(path, name, len);
+#else
+	return -EINVAL;
+#endif
+}
+
 __weak int domain_get_user_cfg_count(void)
 {
 	return 0;
