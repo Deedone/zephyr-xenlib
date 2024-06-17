@@ -65,6 +65,7 @@ static int dom_num = 0;
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 K_MUTEX_DEFINE(dl_mutex);
+K_MUTEX_DEFINE(create_mutex);
 
 static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
 				    struct xen_arch_domainconfig *arch_cfg)
@@ -809,7 +810,17 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 #endif
 
+	k_mutex_lock(&create_mutex, K_FOREVER);
+	if (find_domain_by_name(domcfg->name) != 0) {
+		rc = -EEXIST;
+		LOG_ERR("Domain with name %s already exists", domcfg->name);
+		k_mutex_unlock(&create_mutex);
+		goto stop_domain_console;
+	}
+
 	rc = xs_initialize_xenstore(domid, domain);
+	k_mutex_unlock(&create_mutex);
+
 	if (rc) {
 		goto stop_domain_console;
 	}
